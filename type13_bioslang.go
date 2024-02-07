@@ -46,7 +46,7 @@ func newBIOSLanguageInformation(h dmiHeader) dmiTyper {
 		bl.InstallableLanguage = append(bl.InstallableLanguage, h.FieldString(int(data[i])))
 	}
 	bl.Flags = NewBIOSLanguageInformationFlag(data[0x05])
-	bl.CurrentLanguage = bl.InstallableLanguage[data[0x15]]
+	bl.CurrentLanguage = bl.InstallableLanguage[data[0x15] - 1]
 	return &bl
 }
 
