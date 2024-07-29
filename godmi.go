@@ -22,6 +22,10 @@ var gdmi map[SMBIOSStructureType]interface{}
 
 type SMBIOSStructureType byte
 
+const SYS_FIRMWARE_DIR = "/sys/firmware/dmi/tables"
+const SYS_ENTRY_FILE = SYS_FIRMWARE_DIR + "/smbios_entry_point"
+const SYS_TABLE_FILE = SYS_FIRMWARE_DIR + "/DMI"
+
 const (
 	SMBIOSStructureTypeBIOS SMBIOSStructureType = iota
 	SMBIOSStructureTypeSystem
@@ -664,6 +668,18 @@ func GetGDMI() map[SMBIOSStructureType]interface{} {
 }
 
 func getMem(base uint32, length uint32) (mem []byte, err error) {
+	// Primarily try to get the data from sysfs, which should be always accessible
+	if base == 0xF0000 && length == 0x10000 { //Entrypoint
+		if _, err := os.Stat(SYS_ENTRY_FILE); err == nil {
+			return os.ReadFile(SYS_ENTRY_FILE)
+		}
+	} else {
+		if _, err := os.Stat(SYS_TABLE_FILE); err == nil {
+			return os.ReadFile(SYS_TABLE_FILE)
+		}
+	}
+	// Sysfs is for whatever reason not available, fall back to /dev/mem,
+	// but that is not accessible on locked down kernels
 	file, err := os.Open("/dev/mem")
 	if err != nil {
 		return
