@@ -20,6 +20,10 @@ const OUT_OF_SPEC = "<OUT OF SPEC>"
 
 var gdmi map[SMBIOSStructureType]interface{}
 
+const SMBIOS_32BIT = 32
+const SMBIOS_64BIT = 64
+var smbios_version byte
+
 type SMBIOSStructureType byte
 
 const SYS_FIRMWARE_DIR = "/sys/firmware/dmi/tables"
@@ -137,13 +141,13 @@ type entryPoint struct {
 	Length        byte
 	MajorVersion  byte
 	MinorVersion  byte
-	MaxSize       uint16
+	MaxSize       uint32
 	Revision      byte
 	FormattedArea []byte // 5
 	InterAnchor   []byte // 5
 	InterChecksum byte
 	TableLength   uint16
-	TableAddress  uint32
+	TableAddress  uint64
 	NumberOfSM    uint16
 	BCDRevision   byte
 }
@@ -419,24 +423,40 @@ func newEntryPoint() (eps *entryPoint, err error) {
 		return
 	}
 	data := anchor(mem)
-	eps.Anchor = data[:0x04]
-	eps.Checksum = data[0x04]
-	eps.Length = data[0x05]
-	eps.MajorVersion = data[0x06]
-	eps.MinorVersion = data[0x07]
-	eps.MaxSize = u16(data[0x08:0x0A])
-	eps.FormattedArea = data[0x0B:0x0F]
-	eps.InterAnchor = data[0x10:0x15]
-	eps.InterChecksum = data[0x15]
-	eps.TableLength = u16(data[0x16:0x18])
-	eps.TableAddress = u32(data[0x18:0x1C])
-	eps.NumberOfSM = u16(data[0x1C:0x1E])
-	eps.BCDRevision = data[0x1E]
+	if (smbios_version == SMBIOS_32BIT) {
+		eps.Anchor = data[:0x04]
+		eps.Checksum = data[0x04]
+		eps.Length = data[0x05]
+		eps.MajorVersion = data[0x06]
+		eps.MinorVersion = data[0x07]
+		eps.MaxSize = u32(data[0x08:0x0A])
+		eps.FormattedArea = data[0x0B:0x0F]
+		eps.InterAnchor = data[0x10:0x15]
+		eps.InterChecksum = data[0x15]
+		eps.TableLength = u16(data[0x16:0x18])
+		eps.TableAddress = u64(data[0x18:0x1C])
+		eps.NumberOfSM = u16(data[0x1C:0x1E])
+		eps.BCDRevision = data[0x1E]
+	} else {
+		eps.Anchor = data[:0x05]
+		eps.Checksum = data[0x05]
+		eps.Length = data[0x06]
+		eps.MajorVersion = data[0x07]
+		eps.MinorVersion = data[0x08]
+		eps.MaxSize = u32(data[0x0C:0x10])
+		//eps.FormattedArea = data[0x0B:0x0F]
+		//eps.InterAnchor = data[0x10:0x15]
+		//eps.InterChecksum = data[0x15]
+		//eps.TableLength = u16(data[0x16:0x18])
+		eps.TableAddress = u64(data[0x10:0x18])
+		//eps.NumberOfSM = u16(data[0x1C:0x1E])
+		//eps.BCDRevision = data[0x1E]
+	}
 	return
 }
 
 func (e entryPoint) StructureTableMem() ([]byte, error) {
-	return getMem(e.TableAddress, uint32(e.TableLength))
+	return getMem(e.TableAddress, uint64(e.TableLength))
 }
 
 func (h dmiHeader) Next() *dmiHeader {
@@ -667,7 +687,7 @@ func GetGDMI() map[SMBIOSStructureType]interface{} {
 	return gdmi
 }
 
-func getMem(base uint32, length uint32) (mem []byte, err error) {
+func getMem(base uint64, length uint64) (mem []byte, err error) {
 	// Primarily try to get the data from sysfs, which should be always accessible
 	if base == 0xF0000 && length == 0x10000 { //Entrypoint
 		if _, err := os.Stat(SYS_ENTRY_FILE); err == nil {
@@ -686,7 +706,7 @@ func getMem(base uint32, length uint32) (mem []byte, err error) {
 	}
 	defer file.Close()
 	fd := file.Fd()
-	mmoffset := base % uint32(os.Getpagesize())
+	mmoffset := base % uint64(os.Getpagesize())
 	mm, err := syscall.Mmap(int(fd), int64(base-mmoffset), int(mmoffset+length), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		return
@@ -701,8 +721,14 @@ func getMem(base uint32, length uint32) (mem []byte, err error) {
 }
 
 func anchor(mem []byte) []byte {
+	smbios_version = SMBIOS_32BIT
 	anchor := []byte{'_', 'S', 'M', '_'}
 	i := bytes.Index(mem, anchor)
+	if (i == -1) {
+		anchor = []byte{'_', 'S', 'M', '3', '_'}
+		i = bytes.Index(mem, anchor)
+		smbios_version = SMBIOS_64BIT
+	}
 	return mem[i:]
 }
 
